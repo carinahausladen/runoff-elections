@@ -1,3 +1,8 @@
+# a script to convert the raw data from Bouton et al. 2022 to a clean dataset
+# 
+# Bouton, L., Gallego, J., Llorente-Saguer, A., & Morton, R. (2022). Run-off Elections in the Laboratory. The Economic Journal, 132(641), 106–146. https://doi.org/10.1093/ej/ueab051
+
+
 library(tidyverse)
 library(haven)
 library(zTree)
