@@ -2,8 +2,9 @@ library(tidyverse)
 library(haven)
 library(zTree)
 library(readxl)
+library(psych)
 
-dir <- "/Users/joelmlevin/Documents/Projects/replication/bouton"
+dir <- "bouton"
 setwd(dir)
 
 # options(rstudio.help.showDataPreview = FALSE)
@@ -13,6 +14,10 @@ source("https://raw.githubusercontent.com/joelmlevin/public_r_functions/main/fix
 # importing the clean data, for reference: 
 clean <- read_dta("replication/BGLM_Data.dta") 
 names(clean) <- tolower(names(clean)) 
+
+# there is a typo in which they misspell 'disagreement' in the `treatn` variable, which causes issues later. correcting
+clean <- clean %>% 
+  mutate(treatn = str_replace(treatn, "Disaggreement", "Disagreement"))
 
 # importing the variable definitions
 definitions <- read_excel("replication/BGLM_codebook.xlsx", 
@@ -73,7 +78,11 @@ get_globals <- function(session_id) {
 # get_globals("170920_1023") 
 
 # creating a globals dataset by iterating across session ids
-globals <- map_dfr(session_ids, get_globals)
+
+# globals <- map_dfr(session_ids, get_globals)
+# write_rds(globals, "globals.rds")
+
+globals <- read_rds("globals.rds")
 globals
 
 # note that all of these global variables are actually at the session level (n = 35), not at the session X period level, which is what we appear to have in this dataset
@@ -107,15 +116,17 @@ get_subjects <- function(session_id) {
 
 # iterating across session ids
 
-subjects <- map_dfr(session_ids, get_subjects)
+# subjects <- map_dfr(session_ids, get_subjects)
+# write_rds(subjects, "subjects.rds")
 
+subjects <- read_rds("subjects.rds")
 subjects
 
 # 3. Creating a dataset with both subject and globals data
 
 both_wide <- subjects %>%
   left_join(globals, by = "sessionid") %>%
-  arrange(sessionid, group, )
+  arrange(sessionid, group)
 
 names(both_wide)
 
@@ -123,7 +134,13 @@ names(both_wide)
 # to address this, we'll round every numerical value in the dataset
 
 both_wide <- both_wide %>%
-  mutate(across(where(is.numeric), \(x) round(x, 4)))
+  mutate(across(where(is.numeric), \(x) round(x, 6))) %>%
+  select(-treatment) # a variable that always takes a value of 1 (useless) and has a confusing name
+
+clean <- clean %>%
+  mutate(across(where(is.numeric), \(x) round(x, 6)))
+  
+
 
 # 3 Comparing variables across the original clean data and our assembled dataset
 
@@ -135,6 +152,7 @@ cbind(
   names(clean) %in% names(both_wide) 
 )
 
+# selecting only variables that need to be matched across clean and raw datasets
 needs_matching <- both_wide %>%
   select(!any_of(names(clean)))
 
@@ -143,34 +161,51 @@ needs_matching <- both_wide %>%
 # 2xN tables of variables and their means
 cleanmeans <- clean %>%
   ungroup() %>%
-  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
-  summarise(across(where(is.numeric), round, 3)) %>%
-  pivot_longer(cols = everything())
+  summarise(across(where(is.numeric), \(x) mean(x, na.rm = TRUE))) %>%
+  pivot_longer(cols = everything()) %>%
+  mutate(value = round(value, 6))
 
 cleanmeans %>% print(n=100)
 
 rawmeans <- needs_matching %>%
   ungroup() %>%
   summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
-  summarise(across(where(is.numeric), round, 3)) %>%
-  pivot_longer(cols = everything())
+  pivot_longer(cols = everything()) %>%
+  mutate(value = round(value, 6))
 
 rawmeans %>% print(n=200)
+# 
+# cleanmeans$name %>% sort()
+# rawmeans$name %>% sort()
+# 
+# test <- full_join(cleanmeans, 
+#           rawmeans,
+#           by = "value") 
+# 
+# test %>% arrange(value) %>% print(n=100)
+# 
+# test$name.x %in% test$name.y
+# 
+# cleannamestest <- test$name.x[1:38]
+# 
+# test %>%
+#   filter(name.y %in% test$name.y)
+# 
+# test %>% print(n=200)
 
 # matching these tables based on mean values
-match_means <- left_join(cleanmeans, 
+match_means <- full_join(cleanmeans, 
                          rawmeans,
-                         by = "value") %>%
+                         by = "value") %>% 
   rename(name_clean = name.x,
-         name_raw = name.y) %>%
+         name_raw = name.y) %>% 
   drop_na()
 
-# looking at the matches to make sure that they are face valid.
-# they appear to be
+# looking at the matches to make sure that they are face valid. they all appear to be, with the possible exception of `pab` in the clean data
 match_means %>%
-  # arrange(value) %>%
-  print(n=200)
+  print(n=100)
 
+# manually updating these
 both_wide_renamed <- both_wide %>%
   rename(dta = type_a,
          dtb = type_b,
@@ -178,15 +213,16 @@ both_wide_renamed <- both_wide %>%
          ra = r_a,
          rb = r_b,
          rc = r_c,
+         da = a,
+         db = b,
+         dc = c,
          win1rn = winner_1r
-         
          )
 
-globals 
-unique(clean$rule)
-
-name_diagnostics <- cbind(tolower(names(clean)),
-      tolower(names(clean)) %in% names(both_wide)) %>%
+# identifying which variables are in the clean dataset but not in our new, compiled dataset
+name_diagnostics <- 
+  cbind(tolower(names(clean)), 
+        tolower(names(clean)) %in% names(both_wide_renamed)) %>% 
   as_tibble() %>%
   rename(name_from_clean = V1,
          in_compiled = V2) 
@@ -198,44 +234,42 @@ needtomatch <- name_diagnostics %>%
 # these are variables that appear in the clean data but not in the compiled (raw) dataset
 needtomatch
 
-# variables that are constructed:
-# dwa:dwc are dummies for who they voted for
-  
-# env is baseline or low agreement
-# rule is electoral rule
-# treat and treatn are indicators for the treatment
+# dwa:dwc are dummies for who they voted for [can't infer for runoff conditions, bc simulation]
 # dwx is are dummies for who won the election (we need the simulations for this)
-# pay is the payoff, which is depending on electoral outcomes (which depend on sims)
-# igroup is the group indicator
-# igroupt: NOT SURE 
-# sid: NOT SURE
-# threshold is: the minimal percentage of sincere voting by tB-voters that makes sincere voting a best response for those voters under run-off (pp127, also see Table G3)
-  # NOT IN RAW DATA
-# the nperiods variables are just coarsened period # variables
+# pay: never used in Figures.do or Tables.do --> we do not replicate
+# igroupt: used for Figure 4 and 8 only --> we do not replicate
 
-names(both_wide)
+# adding 'tenperiods' variable
+both_wide_renamed <- both_wide_renamed %>%
+  mutate(tenperiods = cut(period, breaks = seq(0, 60, by = 10), 
+                          labels = seq(10, 60, by = 10), 
+                          include.lowest = TRUE, right = FALSE))
 
-unique(clean$env)
-unique(clean$treatn)
-unique(clean$treat)
-unique(clean$thr)
-unique(clean$dwa)
-unique(clean$dwb)
-unique(clean$dwc)
-unique(clean$pay)
-unique(clean$igroup)
-unique(clean$igroupt)
-unique(clean$sid)
-unique(clean$threshold)
-unique(clean$fiveperiods)
+# adding an 'sid' variable, which uniquely identifies participants
+both_wide_renamed <- both_wide_renamed %>%
+  unite(sid, sessionid, subject, remove = FALSE) %>%
+  mutate(sid = factor(sid))
 
-both_wide %>%
-  group_by(sessionid) %>%
-  mutate(prop_second_round = mean(secondround)) %>%
-  ungroup() %>%
-  transmute(treatment = ifelse(prop_second_round == 0, "Plurality", "Runoff")) %>%
-  count(treatment)
+# adding an 'igroup' variable, which uniquely identifies groups
+both_wide_renamed <- both_wide_renamed %>%
+  unite(igroup, sessionid, group, remove = FALSE) %>%
+  mutate(igroup = factor(igroup))
 
+# names(both_wide)
+# 
+# unique(clean$env)
+# unique(clean$treatn)
+# unique(clean$treat)
+# unique(clean$thr)
+# unique(clean$dwa)
+# unique(clean$dwb)
+# unique(clean$dwc)
+# unique(clean$pay)
+# unique(clean$igroup)
+# unique(clean$igroupt)
+# unique(clean$sid)
+# unique(clean$threshold)
+# unique(clean$fiveperiods)
 
 # because there is no treatment assignment variable in the raw data, we want to check to see whether the authors' treatment assignment is consistent with what's in the raw data
 # the raw data include a dummy variable, `secondround`, that denotes whether there was a second round election in each period, which should only happen in runoff treatments
@@ -258,65 +292,125 @@ inferred_treatment <- both_wide %>%
                                         prop_2n == 0 ~ "Plurality")) %>%
   select(sessionid, inferred_treatment)
 
-
 # identifying baseline versus low disagreement
+# parameters are listed in Tables 1 and 4
+# note that the conditional probabilities (`pab`, etc.) are only useful for differentiating between baseline-runoff and no upset-runoff.
+# conditional probabilities should not be used to distinguish between other conditions because they are *always missing* in plurality conditions 
 
 inferred_parameters <- both_wide_renamed %>%
-  select(sessionid, ra, rb, rc, pac) %>%
+  select(sessionid, ra, rb, rc, pab, pac, pbc) %>%
   unique() %>%
   mutate(
     inferred_parameters = case_when(
-    ra == .34 & rb == .22 & pac == 76 ~ "Baseline", # need to work on integrating the conditional ps into these
-    ra == .43 & rb == .13 ~ "Low Dis",
-    ra == .37 & rb == .24 ~ "Small minority",
-    ra == .34 & rb == .22 & rc == .44 & pac == 99 ~ "No upset")) %>%
+    ra == .34 & 
+      rb == .22 & 
+      rc == .44 &
+      (pac == 76 | is.na(pac)) ~ "Baseline", 
+    ra == .43 & 
+      rb == .13 ~ "Low Disagreement",
+    ra == .37 & 
+      rb == .24 & 
+      rc == .39 ~ "Small Minority",
+    ra == .34 & 
+      rb == .22 & 
+      rc == .44 & 
+      pac == 99 ~ "No Upset")) %>%
   select(sessionid, inferred_parameters)
 
-inferred_parameters %>% group_by(inferred_parameters) %>% count()
+# creating an object with all of the inferred variable names...
+inferred_everything <- inner_join(inferred_treatment, inferred_parameters, by = "sessionid") %>%
+  unite("treatment", inferred_treatment:inferred_parameters, sep = " - ", remove = FALSE) %>%
+  mutate(treat = case_when(
+    treatment == "Plurality - Baseline" ~ "P_B",
+    treatment == "Plurality - Low Disagreement" ~ "P_LD",
+    treatment == "Plurality - Small Minority" ~ "P_SM",
+    treatment == "Runoff - Baseline" ~ "R_B",
+    treatment == "Runoff - Low Disagreement" ~ "R_LD",
+    treatment == "Runoff - Small Minority" ~ "R_SM",
+    treatment == "Runoff - No Upset" ~ "R_NU",
+  ))
 
-inferred_parameters %>%
-  group_by(inferred_parameters) %>% count()
-  filter(between(ra, .42, .44)) %>%
-  count()
+inferred_everything
 
-options(digits=10)
-both_wide_renamed$ra
-unique(both_wide_renamed$ra)
-str(both_wide_renamed$ra)
+# we appear to be missing one runoff, small minority group
+inferred_everything %>% group_by(treatment) %>% count()
+inferred_everything %>% group_by(treat) %>% count()
+
+# are the names the same as in the clean dataset?
+# yes! (after typo correction in the clean dataset)
+identical(
+  sort(unique(inferred_everything$treatment)),
+  sort(unique(clean$treatn))
+)
+
+# merging this into the main dataset
+both_wide_renamed <- inferred_everything %>%
+  select(sessionid, treatment, treat) %>%
+  right_join(both_wide_renamed, by = "sessionid")
 
 both_wide_renamed %>%
-  filter(ra == .34 & rb == 0.22) %>%
-  select(ra, rb)
+  group_by(treatment) %>% count()
 
+both_wide_renamed %>% group_by(group, treatment) %>% count()
+
+# adding a `threshold`, based on table G3 in the manuscript
+# flag
+# it appears that Table G3 has a few errors:
+# 1. the leftmost column has values: "P_B, P_LD, P_SM, R_NU", but there are columns for both runoff and plurality. 
+#    they almost certainly meant not to include the letter before the underscore, which represents election type (runoff or plurality) in their notation.      
+# 2. there is a value for no upset/plurality, which is a condition that doesn't exist. for no upset, only a runoff condition exists  
+# below, we'll create this variable based on our understanding of what the authors intended this table to communicate.
+
+# unique(clean$threshold)
+
+both_wide_renamed <- both_wide_renamed %>%
+  mutate(threshold = case_when(
+    treat == "P_B" ~ 1.0236,
+    treat == "P_LD" ~ 1.7322,
+    treat == "P_SM" ~ 0.9616,
+    treat == "R_B" ~ 0.5845,
+    treat == "R_LD" ~ 1.0607,
+    treat == "R_SM" ~ 0.4786,
+    treat == "R_NU" ~ 0.8345
+  )) 
+
+names(clean)
+unique(clean$env)
+unique(clean$rule)
+names(both_wide_renamed)
+both_wide_renamed$treat
+
+clean_vars <- names(clean)
+clean_vars 
+
+both_wide_renamed$type[both_wide_renamed$type == 1] <- 'a'
+both_wide_renamed$type[both_wide_renamed$type == 2] <- 'b'
+both_wide_renamed$type[both_wide_renamed$type == 3] <- 'c'
+
+"we need to fill NAs. socio demographics were recorded only for period=60 participant"
 both_wide_renamed %>%
-  unite("raandb", ra, rb) %>%
-  .$raandb %>%
-  unique()
+  group_by(sessionid, subject) %>%
+  fill(gender, age, year, risk, trust, experiments, politicosity, .direction = "downup") ->both_wide_renamed
 
-unique(both_wide_renamed$ra)
-unique(both_wide_renamed$rb)
-unique(inferred_parameters$inferred_parameters)
+# making sure that we have every variable in the clean dataset, and that they are named consistently
+output <- both_wide_renamed %>% 
+  rename(treatn = treatment) %>% # renaming
+  separate(treat, c("rule", "env"), remove = FALSE) %>% # creating "rule" and "env" variables
+  select(any_of(names(clean)))
   
+# only variables that are short enough for stata
+# shortenough <- cbind(
+#   names(output),
+#   nchar(names(output))
+# ) %>%
+#   as_tibble() %>%
+#   filter(V2 <= 32) %>%
+#   .$V1
 
-inferred_parameters %>% group_by(inferred_parameters) %>% count()
 
-inferred_parameters
-inferred_treatment
 
-# merging them into the main df
-both_wide_renamed %>%
-  left_join(inferred_parameters, by = "sessionid") %>%
-  left_join(inferred_treatment, by = "sessionid") %>%
-  unite("inferred_condition", inferred_treatment, inferred_parameters) %>%
-  group_by(inferred_condition) %>%
-  count()
 
-# so, we are now comfortable using the authors' treatment variable in building our raw dataset
-treatment_identifiers <- clean %>%
-  select(sessionid, treatn) %>%
-  unique()
 
-both_wide_2 <- both_wide %>% left_join(treatment_identifiers, by = "sessionid")  
-
-unique(both_wide_2$treatn)
+output %>%
+  write_dta("compiled_dataset.dta")
 
