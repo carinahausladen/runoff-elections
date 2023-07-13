@@ -10,15 +10,15 @@ library(zTree)
 library(readxl)
 library(psych)
 
-dir <- "bouton"
-setwd(dir)
+#dir <- "bouton"
+#setwd(dir)
 
 # options(rstudio.help.showDataPreview = FALSE)
 
 source("https://raw.githubusercontent.com/joelmlevin/public_r_functions/main/fix_names.R")
 
 # importing the clean data, for reference: 
-clean <- read_dta("replication/BGLM_Data.dta") 
+clean <- read_dta("BGLM_Data.dta") 
 names(clean) <- tolower(names(clean)) 
 
 # there is a typo in which they misspell 'disagreement' in the `treatn` variable, which causes issues later. correcting
@@ -26,22 +26,21 @@ clean <- clean %>%
   mutate(treatn = str_replace(treatn, "Disaggreement", "Disagreement"))
 
 # importing the variable definitions
-definitions <- read_excel("replication/BGLM_codebook.xlsx", 
-                          skip = 4)
+definitions <- read_excel("BGLM_codebook.xlsx", skip = 4)
 
 # importing the raw data
 # note that the files are stored as csvs, but they appear to actually be xls files that have been named incorrectly.
 # we will first convert these back to xls files, then use the `zTree` package to load them
 # note: before running this code, copy the existing folder 'raw data' in its existing directory and call it 'raw data xls'
 
-old_files <- list.files("replication/additional files/raw data xls/")[1:35]
+old_files <- list.files("raw data xls/")[1:35]
 old_files
-old_paths <- paste0("replication/additional files/raw data xls/", old_files)
+old_paths <- paste0("raw data xls/", old_files)
 old_paths
 
 new_files <- str_replace_all(old_files, "csv", "xls")
 new_files
-new_paths <- paste0("replication/additional files/raw data xls/", new_files)
+new_paths <- paste0("raw data xls/", new_files)
 new_paths
 
 file.rename(from = old_paths, to = new_paths)
@@ -53,7 +52,7 @@ file.rename(from = old_paths, to = new_paths)
 # 1. from the `session_id` variable in the clean data
 clean_sessionids <- unique(clean$sessionid)
 # 2. from the raw data filenames
-raw_sessionids <- list.files("replication/additional files/raw data/")[1:35] %>%
+raw_sessionids <- list.files("raw data/")[1:35] %>%
   str_remove(".csv")
 
 identical(
@@ -69,7 +68,7 @@ session_ids <- clean_sessionids
 # 2.1 A function to import and format globals data from each xls --------
 get_globals <- function(session_id) {
   
-  raw <- zTreeTables(paste0("replication/additional files/raw data xls/", session_id, ".xls"))
+  raw <- zTreeTables(paste0("raw data xls/", session_id, ".xls"))
   
   raw$globals %>%
     as_tibble() %>%
@@ -111,7 +110,7 @@ globals
 # 2.2 A function to import and format subject data from each xls --------
 get_subjects <- function(session_id) {
   
-  raw <- zTreeTables(paste0("replication/additional files/raw data xls/", session_id, ".xls"))
+  raw <- zTreeTables(paste0("raw data xls/", session_id, ".xls"))
   
   raw$subjects %>%
     as_tibble() %>%
@@ -393,7 +392,7 @@ both_wide_renamed$type[both_wide_renamed$type == 1] <- 'a'
 both_wide_renamed$type[both_wide_renamed$type == 2] <- 'b'
 both_wide_renamed$type[both_wide_renamed$type == 3] <- 'c'
 
-"we need to fill NAs. socio demographics were recorded only for period=60 participant"
+#we need to fill NAs. socio demographics were recorded only for period=60 participant
 both_wide_renamed %>%
   group_by(sessionid, subject) %>%
   fill(gender, age, year, risk, trust, experiments, politicosity, .direction = "downup") ->both_wide_renamed
@@ -404,18 +403,6 @@ output <- both_wide_renamed %>%
   separate(treat, c("rule", "env"), remove = FALSE) %>% # creating "rule" and "env" variables
   select(any_of(names(clean)))
   
-# only variables that are short enough for stata
-# shortenough <- cbind(
-#   names(output),
-#   nchar(names(output))
-# ) %>%
-#   as_tibble() %>%
-#   filter(V2 <= 32) %>%
-#   .$V1
-
-
-
-
 
 output %>%
   write_dta("compiled_dataset.dta")
