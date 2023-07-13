@@ -1,8 +1,9 @@
 **/.Rhistory
+**/.Rapp.history
 main_cache
 main_files
 
-/raw data xls
+*.xls
 
 .idea
 .venv
