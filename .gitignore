@@ -4,6 +4,7 @@ main_cache
 main_files
 
 *.xls
+/raw data xls/*.xls
 
 .idea
 .venv
